@@ -8,7 +8,6 @@ param environment string
 param filename1 string
 param filename2 string
 param applicationGatewayName string
-param peerings array
 param num int
 
 var subnetConName = 'snet-dep-con'
@@ -253,13 +252,23 @@ resource virtualNetworkAutomation 'Microsoft.Network/virtualNetworks@2023-06-01'
         }
       }
     ]
-    dhcpOptions: {
-      dnsServers: [
-        '10.52.7.4'
-        '10.52.7.5'
-        '168.63.129.16'
-      ]
     }
+  }
+
+  resource dnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+    name: 'privatelink.file.core.com'
+  }
+  
+  resource arecord 'Microsoft.Network/privateDnsZones/A@2020-06-01' = {
+  name: storageAccountName
+  parent: dnsZone
+  etag: 'string'
+  properties: {
+    aRecords: [
+      {
+        ipv4Address: '10.52.136.0'
+      }
+    ]
   }
 }
 
@@ -322,23 +331,7 @@ resource deploymentScriptIncreaseScript 'Microsoft.Resources/deploymentScripts@2
       }
       {
         name: 'CONTENT1'
-        value: loadTextContent('../appgw-scaling-automation/IncreaseMin_agw-nonprod-01.ps1')
-      }
-      {
-        name: 'CONTENT2'
-        value: loadTextContent('../appgw-scaling-automation/IncreaseMin_agw-prod-01.ps1')
-      }
-      {
-        name: 'CONTENT3'
-        value: loadTextContent('../appgw-scaling-automation/IncreaseMin_agw-ezorg-01.ps1')
-      }
-      {
-        name: 'CONTENT4'
-        value: loadTextContent('../appgw-scaling-automation/IncreaseMin_agw-ezorg-nonprod-01.ps1')
-      }
-      {
-        name: 'CONTENT5'
-        value: loadTextContent('../appgw-scaling-automation/IncreaseMin_agw-nonprod-public-01.ps1')
+        value: loadTextContent('IncreaseMin_agw-nonprod-01.ps1')
       }
     ]
     scriptContent: 'echo "$CONTENT${num}" > ${filename1}.ps1 && az storage blob upload -f ${filename1}.ps1 -c ${containerName} -n ${filename1}.ps1'
@@ -379,26 +372,6 @@ resource deploymentScriptDecreaseScript 'Microsoft.Resources/deploymentScripts@2
       {
         name: 'AZURE_STORAGE_KEY'
         secureValue: storageAccount.listKeys().keys[0].value
-      }
-      {
-        name: 'CONTENT1'
-        value: loadTextContent('../appgw-scaling-automation/DecreaseMin_agw-nonprod-01.ps1')
-      }
-      {
-        name: 'CONTENT2'
-        value: loadTextContent('../appgw-scaling-automation/DecreaseMin_agw-prod-01.ps1')
-      }
-      {
-        name: 'CONTENT3'
-        value: loadTextContent('../appgw-scaling-automation/DecreaseMin_agw-ezorg-01.ps1')
-      }
-      {
-        name: 'CONTENT4'
-        value: loadTextContent('../appgw-scaling-automation/DecreaseMin_agw-ezorg-nonprod-01.ps1')
-      }
-      {
-        name: 'CONTENT5'
-        value: loadTextContent('../appgw-scaling-automation/DecreaseMin_agw-nonprod-public-01.ps1')
       }
     ]
      scriptContent: 'echo "$CONTENT${num}" > ${filename2}.ps1 && az storage blob upload -f ${filename2}.ps1 -c ${containerName} -n ${filename2}.ps1'
@@ -535,30 +508,3 @@ resource deploymentScriptStorage 'Microsoft.Resources/deploymentScripts@2023-08-
      scriptContent: 'az storage account update --name ${storageAccountName} --default-action Deny'
   }
 }
-
-module peeringFromRemote '../modules/deploy.spoke.services.vnet.peering.with.hub.bicep' = [for peering in peerings: {
-  name: 'module-peer-${peering.remoteVnetName}-to-${virtualNetworkAutomation.name}'
-  scope: resourceGroup(peering.resourceGroupName)
-  params: {
-    hubVnetName: peering.remoteVnetName
-    peeringName: peering.?remotePeeringName == null ? 'peer-${peering.remoteVnetName}-to-${virtualNetworkAutomation.name}' : peering.remotePeeringName
-    spokeResourceGroupName: resourceGroup().name
-    spokeVnetName: virtualNetworkAutomation.name
-  }
-}]
-module peeringToRemote '../modules/deploy.spoke.services.vnet.peering.with.hub.bicep' = [for peering in peerings: {
-  name: 'module-peer-${virtualNetworkAutomation.name}-to-${peering.remoteVnetName}'
-  params: {
-    hubVnetName: virtualNetworkAutomation.name
-    peeringName: peering.?localPeeringName == null ? 'peer-${virtualNetworkAutomation.name}-to-${peering.remoteVnetName}' : peering.localPeeringName
-    spokeResourceGroupName: peering.resourceGroupName
-    spokeVnetName: peering.remoteVnetName
-    allowForwardedTraffic:  peering.?allowForwardedTraffic == null ? false : peering.allowForwardedTraffic
-    allowGatewayTransit: peering.?allowGatewayTransit == null ? true : peering.allowGatewayTransit
-    allowVirtualNetworkAccess: peering.?allowVirtualNetworkAccess == null ? true : peering.allowVirtualNetworkAccess
-    useRemoteGateways: peering.?useRemoteGateways == null ? false : peering.useRemoteGateways
-  }
-  dependsOn: [
-    peeringFromRemote
-  ]
-}]
